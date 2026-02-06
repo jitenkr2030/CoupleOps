@@ -13,20 +13,291 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// User Management
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  password          String
+  avatar            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Partner relationship
+  partnerId         String?  @unique
+  partner           User?    @relation("PartnerRelationship", fields: [partnerId], references: [id])
+  reversePartner    User?    @relation("PartnerRelationship")
+  
+  // Role and preferences
+  businessRole      String?  // e.g., "CEO", "CFO", "COO", "CTO"
+  preferences       Json?    // User preferences stored as JSON
+  
+  // Current mode
+  currentMode       String   @default("personal") // "business" or "personal"
+  
+  // Subscription
+  subscriptionPlan  String   @default("free") // "free", "premium", "business"
+  subscriptionEnds  DateTime?
+  
+  // Relationships
+  ownedRoles        Role[]
+  createdDecisions  Decision[] @relation("CreatedDecisions")
+  ownedDecisions    Decision[] @relation("OwnedDecisions")
+  decisionVotes     DecisionVote[]
+  financialEntries  FinancialEntry[]
+  createdTasks      Task[] @relation("CreatedTasks")
+  assignedTasks     Task[] @relation("AssignedTasks")
+  children          Child[] @relation("Parent1")
+  children2         Child[] @relation("Parent2")
+  aiRefereeSessions AiRefereeSession[] @relation("User1Sessions")
+  aiRefereeSessions2 AiRefereeSession[] @relation("User2Sessions")
+  notifications     Notification[]
+  activityLogs      ActivityLog[]
+  
+  @@map("users")
 }
 
-model Post {
+// Role Lock System
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g., "Financial Decisions", "Marketing", "Operations"
+  description String?
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  isLocked    Boolean  @default(false)
+  lockedAt    DateTime?
+  lockedBy    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Related decisions and tasks
+  decisions   Decision[]
+  tasks       Task[]
+  
+  @@map("roles")
+}
+
+// Decision Authority System
+model Decision {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  category    String      // e.g., "financial", "operational", "strategic", "child_related"
+  status      String      @default("active") // "active", "locked", "completed"
+  ownerId     String      // Final decision maker
+  owner       User        @relation("OwnedDecisions", fields: [ownerId], references: [id])
+  createdBy   String
+  creator     User        @relation("CreatedDecisions", fields: [createdBy], references: [id])
+  roleId      String?
+  role        Role?       @relation(fields: [roleId], references: [id])
+  
+  // Timer system
+  discussionEndsAt DateTime?
+  lockedAt         DateTime?
+  finalOutcome     String?
+  
+  // Child-related decisions
+  childId     String?
+  child       Child?      @relation(fields: [childId], references: [id])
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  // Relationships
+  votes       DecisionVote[]
+  
+  @@map("decisions")
+}
+
+model DecisionVote {
+  id         String   @id @default(cuid())
+  decisionId String
+  decision   Decision @relation(fields: [decisionId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  vote       String   // "agree", "disagree", "abstain"
+  comment    String?
+  createdAt  DateTime @default(now())
+  
+  @@unique([decisionId, userId])
+  @@map("decision_votes")
+}
+
+// Money Transparency System
+model FinancialEntry {
+  id          String   @id @default(cuid())
+  type        String   // "income" or "expense"
+  amount      Float
+  description String?
+  category    String   // "business", "personal", "child_education", "child_health", etc.
+  date        DateTime
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  
+  // Child-related expenses
+  childId     String?
+  child       Child?   @relation(fields: [childId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("financial_entries")
+}
+
+// AI Referee System
+model AiRefereeSession {
+  id          String   @id @default(cuid())
+  topic       String
+  user1Input  String
+  user2Input  String
+  user1Id     String
+  user2Id     String
+  user1       User     @relation("User1Sessions", fields: [user1Id], references: [id])
+  user2       User     @relation("User2Sessions", fields: [user2Id], references: [id])
+  summary     String?
+  suggestions Json?    // AI suggestions stored as JSON
+  status      String   @default("active") // "active", "resolved"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("ai_referee_sessions")
+}
+
+// Communication Control
+model CommunicationControl {
+  id              String   @id @default(cuid())
+  topic           String
+  status          String   @default("active") // "active", "frozen", "cooldown"
+  freezeUntil     DateTime?
+  lastDiscussed   DateTime
+  discussionCount Int      @default(0)
+  userId          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("communication_controls")
+}
+
+// Task & Execution Management
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("todo") // "todo", "in_progress", "done", "locked"
+  priority    String   @default("medium") // "low", "medium", "high"
+  createdBy   String
+  creator     User     @relation("CreatedTasks", fields: [createdBy], references: [id])
+  assignedTo  String
+  assignee    User     @relation("AssignedTasks", fields: [assignedTo], references: [id])
+  roleId      String?
+  role        Role?    @relation(fields: [roleId], references: [id])
+  dueDate     DateTime?
+  completedAt DateTime?
+  lockedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("tasks")
+}
+
+// Children Profile Management
+model Child {
+  id          String   @id @default(cuid())
+  name        String
+  dateOfBirth DateTime
+  class       String?
+  school      String?
+  parentId1   String
+  parentId2   String
+  parent1     User     @relation("Parent1", fields: [parentId1], references: [id])
+  parent2     User     @relation("Parent2", fields: [parentId2], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relationships
+  decisions   Decision[]
+  expenses    FinancialEntry[]
+  calendarEvents CalendarEvent[]
+  
+  @@map("children")
+}
+
+// Child Calendar & Reminders
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  type        String   // "school", "exam", "activity", "fee_due", "medical"
+  startDate   DateTime
+  endDate     DateTime?
+  reminderAt  DateTime?
+  childId     String
+  child       Child    @relation(fields: [childId], references: [id])
+  isRecurring Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("calendar_events")
+}
+
+// Emergency Override System
+model EmergencyOverride {
+  id          String   @id @default(cuid())
+  reason      String
+  userId      String
+  decisionId  String?
+  taskId      String?
+  status      String   @default("active") // "active", "expired"
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  
+  @@map("emergency_overrides")
+}
+
+// Notifications & Alerts
+model Notification {
   id        String   @id @default(cuid())
   title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  message   String
+  type      String   // "role_violation", "decision_lock", "expense_update", "reminder", "emergency"
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  isRead    Boolean  @default(false)
+  data      Json?    // Additional notification data
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  
+  @@map("notifications")
+}
+
+// Activity Logs for Privacy & Security
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String   // "login", "partner_invite", "role_change", "decision_create", etc.
+  resource   String?  // Resource type (decision, task, child, etc.)
+  resourceId String?  // Resource ID
+  metadata   Json?    // Additional context
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  
+  @@map("activity_logs")
+}
+
+// Subscription Management
+model Subscription {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  plan        String   // "free", "premium", "business"
+  status      String   // "active", "cancelled", "expired"
+  startsAt    DateTime
+  endsAt      DateTime?
+  autoRenew   Boolean  @default(true)
+  paymentId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("subscriptions")
 }
